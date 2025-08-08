@@ -1,0 +1,28 @@
+<idea-plugin>
+    <id>com.example.mvpcreator</id>
+    <name>MVP Creator</name>
+    <version>1.5</version>
+    <vendor email="support@example.com" url="http://example.com">Your Name</vendor>
+
+    <description>
+        <![CDATA[
+        Generates MVP structure with Activity, Model, Presenter and Contract classes.
+        ]]>
+    </description>
+
+    <!-- 兼容2021.3到2025+ -->
+    <idea-version since-build="213" until-build="259.*"/>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.kotlin</depends>
+
+    <actions>
+        <action id="MVP.CreateMvpAction"
+                class="com.example.mvpcreator.CreateMvpAction"
+                text="Create MVP Structure"
+                description="Generate MVP classes">
+            <add-to-group group-id="NewGroup" anchor="after" relative-to-action="NewFile"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt M"/>
+        </action>
+    </actions>
+</idea-plugin>
