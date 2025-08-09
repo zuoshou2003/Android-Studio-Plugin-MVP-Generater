@@ -11,6 +11,7 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.psi.*
+import com.intellij.psi.search.GlobalSearchScope
 import java.awt.BorderLayout
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -21,6 +22,7 @@ class CreateMvpAction : AnAction("创建MVP包结构") {
     companion object {
         private const val LAST_PACKAGE_KEY = "mvp_creator_last_package"
         private const val LAST_BASE_OPTION_KEY = "mvp_creator_last_base_option"
+        private val BASE_PATHS = listOf("base", "common.base", "core.base", "framework.base", "mvp.base")
     }
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
@@ -94,6 +96,16 @@ class CreateMvpAction : AnAction("创建MVP包结构") {
                                 ""
                             }
 
+                            // 自动检测基础接口
+                            val (basePresenterPath, baseViewPath) = if (createBase) {
+                                Pair(basePackagePath, basePackagePath)
+                            } else {
+                                findExistingBaseInterfaces(project, selectedDir)
+                            }
+
+                            val hasBasePresenter = basePresenterPath.isNotEmpty()
+                            val hasBaseView = baseViewPath.isNotEmpty()
+
                             if (createBase && basePackagePath.isNotEmpty()) {
                                 val basePackageDir = createPackageHierarchy(selectedDir, "base")
 
@@ -137,20 +149,17 @@ class CreateMvpAction : AnAction("创建MVP包结构") {
                                 name = "I${classNamePrefix}Contract",
                                 content = """|package $fullPackageForFiles;
                                             |
-                                            |${if (createBase && basePackagePath.isNotEmpty())
-                                    "import $basePackagePath.BasePresenter;\n" +
-                                            "import $basePackagePath.BaseView;"
-                                else ""}
+                                            |${if (hasBasePresenter) "import $basePresenterPath.BasePresenter;\n" else ""}${if (hasBaseView) "import $baseViewPath.BaseView;\n" else ""}
                                             |/**
                                             | * 作者: ${System.getProperty("user.name")}, 
                                             | * 日期: ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
                                             | */
                                             |public interface I${classNamePrefix}Contract {
-                                            |    interface View extends ${if (createBase) "BaseView<Presenter>" else "Object"} {
+                                            |    interface View extends ${if (hasBaseView) "BaseView<Presenter>" else "Object"} {
                                             |        
                                             |    }
                                             |
-                                            |    interface Presenter extends ${if (createBase) "BasePresenter" else "Object"} {
+                                            |    interface Presenter extends ${if (hasBasePresenter) "BasePresenter" else "Object"} {
                                             |        void destroy();
                                             |    }
                                             |
@@ -169,9 +178,7 @@ class CreateMvpAction : AnAction("创建MVP包结构") {
                                             |
                                             |import android.os.Bundle;
                                             |import androidx.appcompat.app.AppCompatActivity;
-                                            |${if (createBase && basePackagePath.isNotEmpty())
-                                    "import $basePackagePath.BaseView;"
-                                else ""}
+                                            |${if (hasBaseView) "import $baseViewPath.BaseView;\n" else ""}
                                             |/**
                                             | * 作者: ${System.getProperty("user.name")}, 
                                             | * 日期: ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
@@ -185,9 +192,9 @@ class CreateMvpAction : AnAction("创建MVP包结构") {
                                             |    protected void onCreate(Bundle savedInstanceState) {
                                             |        super.onCreate(savedInstanceState);
                                             |        mPresenter = new ${classNamePrefix}Presenter(this);
-                                            |        ${if (createBase) "//presenter.start();" else ""}
+                                            |        ${if (hasBasePresenter) "//mPresenter.start();" else ""}
                                             |    }
-                                            |${if (createBase) """
+                                            |${if (hasBaseView) """
                                             |    @Override
                                             |    public void setPresenter(I${classNamePrefix}Contract.Presenter presenter) {
                                             |        this.mPresenter = presenter;
@@ -203,25 +210,23 @@ class CreateMvpAction : AnAction("创建MVP包结构") {
                                 name = "${classNamePrefix}Presenter",
                                 content = """|package $fullPackageForFiles;
                                             |
-                                            |${if (createBase && basePackagePath.isNotEmpty())
-                                    "import $basePackagePath.BasePresenter;"
-                                else ""}
+                                            |${if (hasBasePresenter) "import $basePresenterPath.BasePresenter;\n" else ""}
                                             |/**
                                             | * 作者: ${System.getProperty("user.name")}, 
                                             | * 日期: ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
                                             | */
                                             |public class ${classNamePrefix}Presenter 
-                                            |    implements I${classNamePrefix}Contract.Presenter${if (createBase) ", BasePresenter" else ""} {
+                                            |    implements I${classNamePrefix}Contract.Presenter${if (hasBasePresenter) ", BasePresenter" else ""} {
                                             |    
-                                            |    private I${classNamePrefix}Contract.View view;
-                                            |    private ${classNamePrefix}Model model;
+                                            |    private I${classNamePrefix}Contract.View mView;
+                                            |    private ${classNamePrefix}Model mModel;
                                             |
                                             |    public ${classNamePrefix}Presenter(I${classNamePrefix}Contract.View view) {
-                                            |        this.view = view;
-                                            |        this.model = new ${classNamePrefix}Model();
-                                            |        ${if (createBase) "this.view.setPresenter(this);" else ""}
+                                            |        this.mView = view;
+                                            |        this.mModel = new ${classNamePrefix}Model();
+                                            |        ${if (hasBaseView) "this.mView.setPresenter(this);" else ""}
                                             |    }
-                                            |${if (createBase) """
+                                            |${if (hasBasePresenter) """
                                             |    @Override
                                             |    public void start() {
                                             |        // 在此初始化逻辑
@@ -229,8 +234,8 @@ class CreateMvpAction : AnAction("创建MVP包结构") {
                                             |""" else ""}
                                             |    @Override
                                             |    public void destroy() {
-                                            |        model.destroy();
-                                            |        view = null;
+                                            |        mModel.destroy();
+                                            |        mView = null;
                                             |    }
                                             |}""".trimMargin()
                             )
@@ -274,6 +279,22 @@ class CreateMvpAction : AnAction("创建MVP包结构") {
                 }
             }
         })
+    }
+
+    private fun findExistingBaseInterfaces(project: Project, startDir: PsiDirectory): Pair<String, String> {
+        var basePresenterPath = ""
+        var baseViewPath = ""
+
+        // 简化查找逻辑，只查找当前项目的base包
+        val baseDir = startDir.findSubdirectory("base") ?: return Pair("", "")
+
+        val basePackageName = baseDir.getPackageName()
+        if (basePackageName.isNotEmpty()) {
+            basePresenterPath = basePackageName
+            baseViewPath = basePackageName
+        }
+
+        return Pair(basePresenterPath, baseViewPath)
     }
 
     private fun PsiDirectory.getPackageName(): String {
