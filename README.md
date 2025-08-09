@@ -1,0 +1,5 @@
+MVP-Generater插件使用方法（目前版本只支持JAVA）
+实现功能在AS右键已有包，新建菜单中新增功能创建MVP包结构
+输入完整包名，自动创建
+没有附带创建基础接口时自动在该包搜索baseview和basepresnter
+创建JAVA类时会自动补充顶级注释
