@@ -60,30 +60,27 @@ class CreateMvpAction : AnAction("Create MVP Package") {
                 try {
                     WriteCommandAction.runWriteCommandAction(project) {
                         runWriteAction {
-                            // 获取基础包名（去掉最后一级）
-                            val basePackage = if (packageName.contains('.')) {
-                                packageName.substringBeforeLast('.')
-                            } else {
-                                // 如果只有一级包名，则放在上一级目录的base包中
-                                val parentDir = baseDir.parent?.takeIf { it.name != "java" && it.name != "src" }
-                                    ?: baseDir
-                                createPackageHierarchy(parentDir, "base")
-                                ""
-                            }
-
                             val classNamePrefix = packageName.substringAfterLast('.')
                                 .replaceFirstChar { it.uppercase() }
 
-                            // 创建Base包和接口（与目标包同级）
+                            // 创建主包目录
+                            val packageDir = createPackageHierarchy(baseDir, packageName)
+
+                            // 创建Base包（与目标包同级）
                             if (createBase) {
-                                val basePackagePath = if (basePackage.isEmpty()) "base" else "$basePackage.base"
-                                val basePackageDir = createPackageHierarchy(baseDir, basePackagePath)
+                                val basePackageName = if (packageName.contains('.')) {
+                                    "${packageName.substringBeforeLast('.')}.Base"
+                                } else {
+                                    "Base"
+                                }
+
+                                val basePackageDir = createPackageHierarchy(baseDir, basePackageName)
 
                                 createJavaFile(
                                     project = project,
                                     dir = basePackageDir,
                                     name = "BasePresenter",
-                                    content = """|package ${if (basePackage.isEmpty()) "base" else "$basePackage.base"};
+                                    content = """|package $basePackageName;
                                                 |
                                                 |/**
                                                 | * Author by ${System.getProperty("user.name")}, 
@@ -98,7 +95,7 @@ class CreateMvpAction : AnAction("Create MVP Package") {
                                     project = project,
                                     dir = basePackageDir,
                                     name = "BaseView",
-                                    content = """|package ${if (basePackage.isEmpty()) "base" else "$basePackage.base"};
+                                    content = """|package $basePackageName;
                                                 |
                                                 |/**
                                                 | * Author by ${System.getProperty("user.name")}, 
@@ -110,9 +107,6 @@ class CreateMvpAction : AnAction("Create MVP Package") {
                                 )
                             }
 
-                            // 创建主包目录
-                            val packageDir = createPackageHierarchy(baseDir, packageName)
-
                             // 生成Contract（完美格式化）
                             createJavaFile(
                                 project = project,
@@ -121,8 +115,8 @@ class CreateMvpAction : AnAction("Create MVP Package") {
                                 content = """|package $packageName;
                                             |
                                             |${if (createBase)
-                                    "import ${if (basePackage.isEmpty()) "base" else "$basePackage.base"}.BasePresenter;\n" +
-                                            "import ${if (basePackage.isEmpty()) "base" else "$basePackage.base"}.BaseView;"
+                                    "import ${if (packageName.contains('.')) packageName.substringBeforeLast('.') + ".Base" else "Base"}.BasePresenter;\n" +
+                                            "import ${if (packageName.contains('.')) packageName.substringBeforeLast('.') + ".Base" else "Base"}.BaseView;"
                                 else ""}
                                             |/**
                                             | * Author by ${System.getProperty("user.name")}, 
@@ -153,30 +147,30 @@ class CreateMvpAction : AnAction("Create MVP Package") {
                                             |import android.os.Bundle;
                                             |import androidx.appcompat.app.AppCompatActivity;
                                             |${if (createBase)
-                                    "import ${if (basePackage.isEmpty()) "base" else "$basePackage.base"}.BaseView;"
+                                    "import ${if (packageName.contains('.')) packageName.substringBeforeLast('.') + ".Base" else "Base"}.BaseView;"
                                 else ""}
                                             |/**
                                             | * Author by ${System.getProperty("user.name")}, 
-                                            | * Date on ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
-                                            | */
-                                            |public class ${classNamePrefix}Activity extends AppCompatActivity 
-                                            |    implements I${classNamePrefix}Contract.View {
-                                            |    
-                                            |    private ${classNamePrefix}Presenter presenter;
-                                            |
-                                            |    @Override
-                                            |    protected void onCreate(Bundle savedInstanceState) {
-                                            |        super.onCreate(savedInstanceState);
-                                            |        presenter = new ${classNamePrefix}Presenter(this);
-                                            |        ${if (createBase) "presenter.start();" else ""}
-                                            |    }
-                                            |${if (createBase) """
-                                            |    @Override
-                                            |    public void setPresenter(${classNamePrefix}Presenter presenter) {
-                                            |        // Implementation here
-                                            |    }
-                                            |""" else ""}
-                                            |}""".trimMargin()
+                                                | * Date on ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
+                                                | */
+                                                |public class ${classNamePrefix}Activity extends AppCompatActivity 
+                                                |    implements I${classNamePrefix}Contract.View {
+                                                |    
+                                                |    private ${classNamePrefix}Presenter presenter;
+                                                |
+                                                |    @Override
+                                                |    protected void onCreate(Bundle savedInstanceState) {
+                                                |        super.onCreate(savedInstanceState);
+                                                |        presenter = new ${classNamePrefix}Presenter(this);
+                                                |        ${if (createBase) "presenter.start();" else ""}
+                                                |    }
+                                                |${if (createBase) """
+                                                |    @Override
+                                                |    public void setPresenter(${classNamePrefix}Presenter presenter) {
+                                                |        // Implementation here
+                                                |    }
+                                                |""" else ""}
+                                                |}""".trimMargin()
                             )
 
                             // 生成Presenter（完美格式化）
@@ -187,7 +181,7 @@ class CreateMvpAction : AnAction("Create MVP Package") {
                                 content = """|package $packageName;
                                             |
                                             |${if (createBase)
-                                    "import ${if (basePackage.isEmpty()) "base" else "$basePackage.base"}.BasePresenter;"
+                                    "import ${if (packageName.contains('.')) packageName.substringBeforeLast('.') + ".Base" else "Base"}.BasePresenter;"
                                 else ""}
                                             |/**
                                             | * Author by ${System.getProperty("user.name")}, 
