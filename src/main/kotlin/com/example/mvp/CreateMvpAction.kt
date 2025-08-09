@@ -1,5 +1,6 @@
 package com.example.mvpcreator
 
+import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.runWriteAction
@@ -15,7 +16,12 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import javax.swing.*
 
-class CreateMvpAction : AnAction("Create MVP Package") {
+class CreateMvpAction : AnAction("创建MVP包结构") {
+
+    companion object {
+        private const val LAST_PACKAGE_KEY = "mvp_creator_last_package"
+        private const val LAST_BASE_OPTION_KEY = "mvp_creator_last_base_option"
+    }
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
@@ -27,17 +33,20 @@ class CreateMvpAction : AnAction("Create MVP Package") {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val baseDir = e.getData(CommonDataKeys.VIRTUAL_FILE)?.let {
+        val selectedDir = e.getData(CommonDataKeys.VIRTUAL_FILE)?.let {
             PsiManager.getInstance(project).findDirectory(it)
         } ?: return
 
-        // 创建自定义对话框（复选框默认不选中）
+        val properties = PropertiesComponent.getInstance(project)
+        val lastPackage = properties.getValue(LAST_PACKAGE_KEY)
+        val lastBaseOption = properties.getBoolean(LAST_BASE_OPTION_KEY, false)
+
         val dialogPanel = JPanel(BorderLayout(5, 5)).apply {
-            add(JLabel("Enter package name (e.g. bluetooth):"), BorderLayout.NORTH)
-            add(JTextField(30).apply {
+            add(JLabel("输入完整包名 (例如: com.project.myapplication.bluetooth):"), BorderLayout.NORTH)
+            add(JTextField(lastPackage ?: "", 30).apply {
                 name = "packageInput"
             }, BorderLayout.CENTER)
-            add(JCheckBox("Create Base interfaces (BasePresenter/BaseView)", false).apply {
+            add(JCheckBox("创建基础接口 (BasePresenter/BaseView)", lastBaseOption).apply {
                 name = "baseCheckbox"
             }, BorderLayout.SOUTH)
         }
@@ -45,46 +54,59 @@ class CreateMvpAction : AnAction("Create MVP Package") {
         val result = JOptionPane.showConfirmDialog(
             null,
             dialogPanel,
-            "Create MVP Package",
+            "创建MVP包结构",
             JOptionPane.OK_CANCEL_OPTION,
             JOptionPane.QUESTION_MESSAGE
         )
 
         if (result != JOptionPane.OK_OPTION) return
 
-        val packageName = (dialogPanel.getComponent(1) as JTextField).text.takeIf { it.isNotBlank() } ?: return
+        val fullPackageName = (dialogPanel.getComponent(1) as JTextField).text.takeIf { it.isNotBlank() } ?: return
         val createBase = (dialogPanel.getComponent(2) as JCheckBox).isSelected
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Generating MVP Structure", true) {
+        properties.setValue(LAST_PACKAGE_KEY, fullPackageName)
+        properties.setValue(LAST_BASE_OPTION_KEY, createBase)
+
+        var fullPackageForFiles = ""
+
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "正在生成MVP结构", true) {
             override fun run(indicator: ProgressIndicator) {
                 try {
                     WriteCommandAction.runWriteCommandAction(project) {
                         runWriteAction {
-                            val classNamePrefix = packageName.substringAfterLast('.')
+                            val classNamePrefix = fullPackageName.substringAfterLast('.')
                                 .replaceFirstChar { it.uppercase() }
 
-                            // 创建主包目录
-                            val packageDir = createPackageHierarchy(baseDir, packageName)
+                            val lastPackageName = fullPackageName.substringAfterLast('.')
+                            val packageDir = createPackageHierarchy(selectedDir, lastPackageName)
 
-                            // 创建Base包（与目标包同级）
-                            if (createBase) {
-                                val basePackageName = if (packageName.contains('.')) {
-                                    "${packageName.substringBeforeLast('.')}.Base"
-                                } else {
-                                    "Base"
-                                }
+                            val currentPackage = selectedDir.getPackageName()
+                            fullPackageForFiles = if (currentPackage.isNotEmpty()) {
+                                "$currentPackage.$lastPackageName"
+                            } else {
+                                lastPackageName
+                            }
 
-                                val basePackageDir = createPackageHierarchy(baseDir, basePackageName)
+                            val basePackagePath = if (createBase) {
+                                val basePackageDir = createPackageHierarchy(selectedDir, "base")
+                                "${selectedDir.getPackageName()}.base"
+                            } else {
+                                ""
+                            }
+
+                            if (createBase && basePackagePath.isNotEmpty()) {
+                                val basePackageDir = createPackageHierarchy(selectedDir, "base")
 
                                 createJavaFile(
                                     project = project,
                                     dir = basePackageDir,
+                                    packageName = basePackagePath,
                                     name = "BasePresenter",
-                                    content = """|package $basePackageName;
+                                    content = """|package $basePackagePath;
                                                 |
                                                 |/**
-                                                | * Author by ${System.getProperty("user.name")}, 
-                                                | * Date on ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
+                                                | * 作者: ${System.getProperty("user.name")}, 
+                                                | * 日期: ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
                                                 | */
                                                 |public interface BasePresenter {
                                                 |    void start();
@@ -94,12 +116,13 @@ class CreateMvpAction : AnAction("Create MVP Package") {
                                 createJavaFile(
                                     project = project,
                                     dir = basePackageDir,
+                                    packageName = basePackagePath,
                                     name = "BaseView",
-                                    content = """|package $basePackageName;
+                                    content = """|package $basePackagePath;
                                                 |
                                                 |/**
-                                                | * Author by ${System.getProperty("user.name")}, 
-                                                | * Date on ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
+                                                | * 作者: ${System.getProperty("user.name")}, 
+                                                | * 日期: ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
                                                 | */
                                                 |public interface BaseView<T> {
                                                 |    void setPresenter(T presenter);
@@ -107,24 +130,24 @@ class CreateMvpAction : AnAction("Create MVP Package") {
                                 )
                             }
 
-                            // 生成Contract（完美格式化）
                             createJavaFile(
                                 project = project,
                                 dir = packageDir,
+                                packageName = fullPackageForFiles,
                                 name = "I${classNamePrefix}Contract",
-                                content = """|package $packageName;
+                                content = """|package $fullPackageForFiles;
                                             |
-                                            |${if (createBase)
-                                    "import ${if (packageName.contains('.')) packageName.substringBeforeLast('.') + ".Base" else "Base"}.BasePresenter;\n" +
-                                            "import ${if (packageName.contains('.')) packageName.substringBeforeLast('.') + ".Base" else "Base"}.BaseView;"
+                                            |${if (createBase && basePackagePath.isNotEmpty())
+                                    "import $basePackagePath.BasePresenter;\n" +
+                                            "import $basePackagePath.BaseView;"
                                 else ""}
                                             |/**
-                                            | * Author by ${System.getProperty("user.name")}, 
-                                            | * Date on ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
+                                            | * 作者: ${System.getProperty("user.name")}, 
+                                            | * 日期: ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
                                             | */
                                             |public interface I${classNamePrefix}Contract {
                                             |    interface View extends ${if (createBase) "BaseView<Presenter>" else "Object"} {
-                                            |        // Add your view methods here
+                                            |        
                                             |    }
                                             |
                                             |    interface Presenter extends ${if (createBase) "BasePresenter" else "Object"} {
@@ -137,55 +160,55 @@ class CreateMvpAction : AnAction("Create MVP Package") {
                                             |}""".trimMargin()
                             )
 
-                            // 生成Activity（完美格式化）
                             createJavaFile(
                                 project = project,
                                 dir = packageDir,
+                                packageName = fullPackageForFiles,
                                 name = "${classNamePrefix}Activity",
-                                content = """|package $packageName;
+                                content = """|package $fullPackageForFiles;
                                             |
                                             |import android.os.Bundle;
                                             |import androidx.appcompat.app.AppCompatActivity;
-                                            |${if (createBase)
-                                    "import ${if (packageName.contains('.')) packageName.substringBeforeLast('.') + ".Base" else "Base"}.BaseView;"
+                                            |${if (createBase && basePackagePath.isNotEmpty())
+                                    "import $basePackagePath.BaseView;"
                                 else ""}
                                             |/**
-                                            | * Author by ${System.getProperty("user.name")}, 
-                                                | * Date on ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
-                                                | */
-                                                |public class ${classNamePrefix}Activity extends AppCompatActivity 
-                                                |    implements I${classNamePrefix}Contract.View {
-                                                |    
-                                                |    private ${classNamePrefix}Presenter presenter;
-                                                |
-                                                |    @Override
-                                                |    protected void onCreate(Bundle savedInstanceState) {
-                                                |        super.onCreate(savedInstanceState);
-                                                |        presenter = new ${classNamePrefix}Presenter(this);
-                                                |        ${if (createBase) "presenter.start();" else ""}
-                                                |    }
-                                                |${if (createBase) """
-                                                |    @Override
-                                                |    public void setPresenter(${classNamePrefix}Presenter presenter) {
-                                                |        // Implementation here
-                                                |    }
-                                                |""" else ""}
-                                                |}""".trimMargin()
+                                            | * 作者: ${System.getProperty("user.name")}, 
+                                            | * 日期: ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
+                                            | */
+                                            |public class ${classNamePrefix}Activity extends AppCompatActivity 
+                                            |    implements I${classNamePrefix}Contract.View {
+                                            |    
+                                            |    private I${classNamePrefix}Contract.Presenter mPresenter;
+                                            |
+                                            |    @Override
+                                            |    protected void onCreate(Bundle savedInstanceState) {
+                                            |        super.onCreate(savedInstanceState);
+                                            |        mPresenter = new ${classNamePrefix}Presenter(this);
+                                            |        ${if (createBase) "//presenter.start();" else ""}
+                                            |    }
+                                            |${if (createBase) """
+                                            |    @Override
+                                            |    public void setPresenter(I${classNamePrefix}Contract.Presenter presenter) {
+                                            |        this.mPresenter = presenter;
+                                            |    }
+                                            |""" else ""}
+                                            |}""".trimMargin()
                             )
 
-                            // 生成Presenter（完美格式化）
                             createJavaFile(
                                 project = project,
                                 dir = packageDir,
+                                packageName = fullPackageForFiles,
                                 name = "${classNamePrefix}Presenter",
-                                content = """|package $packageName;
+                                content = """|package $fullPackageForFiles;
                                             |
-                                            |${if (createBase)
-                                    "import ${if (packageName.contains('.')) packageName.substringBeforeLast('.') + ".Base" else "Base"}.BasePresenter;"
+                                            |${if (createBase && basePackagePath.isNotEmpty())
+                                    "import $basePackagePath.BasePresenter;"
                                 else ""}
                                             |/**
-                                            | * Author by ${System.getProperty("user.name")}, 
-                                            | * Date on ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
+                                            | * 作者: ${System.getProperty("user.name")}, 
+                                            | * 日期: ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
                                             | */
                                             |public class ${classNamePrefix}Presenter 
                                             |    implements I${classNamePrefix}Contract.Presenter${if (createBase) ", BasePresenter" else ""} {
@@ -201,7 +224,7 @@ class CreateMvpAction : AnAction("Create MVP Package") {
                                             |${if (createBase) """
                                             |    @Override
                                             |    public void start() {
-                                            |        // Initialization logic here
+                                            |        // 在此初始化逻辑
                                             |    }
                                             |""" else ""}
                                             |    @Override
@@ -212,21 +235,21 @@ class CreateMvpAction : AnAction("Create MVP Package") {
                                             |}""".trimMargin()
                             )
 
-                            // 生成Model（完美格式化）
                             createJavaFile(
                                 project = project,
                                 dir = packageDir,
+                                packageName = fullPackageForFiles,
                                 name = "${classNamePrefix}Model",
-                                content = """|package $packageName;
+                                content = """|package $fullPackageForFiles;
                                             |
                                             |/**
-                                            | * Author by ${System.getProperty("user.name")}, 
-                                            | * Date on ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
+                                            | * 作者: ${System.getProperty("user.name")}, 
+                                            | * 日期: ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
                                             | */
                                             |public class ${classNamePrefix}Model implements I${classNamePrefix}Contract.Model {
                                             |    @Override
                                             |    public void destroy() {
-                                            |        // Cleanup resources
+                                            |        // 清理资源
                                             |    }
                                             |}""".trimMargin()
                             )
@@ -236,16 +259,16 @@ class CreateMvpAction : AnAction("Create MVP Package") {
                     ApplicationManager.getApplication().invokeLater {
                         Messages.showInfoMessage(
                             project,
-                            "MVP package created: $packageName${if (createBase) "\nWith Base interfaces" else ""}",
-                            "Success"
+                            "MVP包创建成功: $fullPackageForFiles${if (createBase) "\n包含基础接口" else ""}",
+                            "成功"
                         )
                     }
                 } catch (ex: Exception) {
                     ApplicationManager.getApplication().invokeLater {
                         Messages.showErrorDialog(
                             project,
-                            "Generation failed: ${ex.message}",
-                            "Error"
+                            "生成失败: ${ex.message}",
+                            "错误"
                         )
                     }
                 }
@@ -253,12 +276,22 @@ class CreateMvpAction : AnAction("Create MVP Package") {
         })
     }
 
+    private fun PsiDirectory.getPackageName(): String {
+        val path = this.virtualFile.path
+        val javaIndex = path.indexOf("java/")
+        if (javaIndex == -1) return ""
+
+        val packagePath = path.substring(javaIndex + 5)
+        return packagePath.replace('/', '.')
+    }
+
     private fun createPackageHierarchy(baseDir: PsiDirectory, packageName: String): PsiDirectory {
         return packageName.split('.').fold(baseDir) { currentDir, subDir ->
-            currentDir.findSubdirectory(subDir) ?: runWriteAction {
-                currentDir.createSubdirectory(subDir).also {
-                    // 确保目录创建成功
-                    if (!it.isValid) throw IllegalStateException("Failed to create directory: $subDir")
+            currentDir.subdirectories.firstOrNull {
+                it.name.equals(subDir, ignoreCase = true)
+            } ?: runWriteAction {
+                currentDir.createSubdirectory(subDir.lowercase()).also {
+                    if (!it.isValid) throw IllegalStateException("创建目录失败: $subDir")
                 }
             }
         }
@@ -267,15 +300,18 @@ class CreateMvpAction : AnAction("Create MVP Package") {
     private fun createJavaFile(
         project: Project,
         dir: PsiDirectory,
+        packageName: String,
         name: String,
         content: String
     ) {
-        if (dir.findFile("$name.java") != null) {
+        val fileName = "${name}.java"
+
+        if (dir.findFile(fileName) != null) {
             ApplicationManager.getApplication().invokeLater {
                 Messages.showWarningDialog(
                     project,
-                    "File $name.java already exists - skipping",
-                    "Warning"
+                    "文件 $fileName 已存在 - 跳过创建",
+                    "警告"
                 )
             }
             return
@@ -283,10 +319,10 @@ class CreateMvpAction : AnAction("Create MVP Package") {
 
         runWriteAction {
             try {
-                val file = dir.createFile("$name.java")
+                val file = dir.createFile(fileName)
                 file.virtualFile.setBinaryContent(content.toByteArray())
             } catch (ex: Exception) {
-                throw IllegalStateException("Failed to create file $name.java: ${ex.message}")
+                throw IllegalStateException("创建文件 $fileName 失败: ${ex.message}")
             }
         }
     }
