@@ -215,7 +215,6 @@ class CreateMvpAction : AnAction("创建MVP包结构") {
                                             |
                                             |import android.os.Bundle;
                                             |import androidx.appcompat.app.AppCompatActivity;
-                                            |${if (hasBaseView) "import $baseViewPath.BaseView;\n" else ""}
                                             |/**
                                             | * 作者: ${System.getProperty("user.name")}, 
                                             | * 日期: ${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))}.
