@@ -11,11 +11,13 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.psi.*
-import com.intellij.psi.search.GlobalSearchScope
-import java.awt.BorderLayout
+import java.awt.Font
+import java.awt.Dimension
+import java.awt.Color
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import javax.swing.*
+import javax.swing.BoxLayout
 
 class CreateMvpAction : AnAction("创建MVP包结构") {
 
@@ -43,14 +45,49 @@ class CreateMvpAction : AnAction("创建MVP包结构") {
         val lastPackage = properties.getValue(LAST_PACKAGE_KEY)
         val lastBaseOption = properties.getBoolean(LAST_BASE_OPTION_KEY, false)
 
-        val dialogPanel = JPanel(BorderLayout(5, 5)).apply {
-            add(JLabel("输入完整包名 (例如: com.project.myapplication.bluetooth):"), BorderLayout.NORTH)
+        // 创建组件引用
+        lateinit var packageInputField: JTextField
+        lateinit var baseCheckbox: JCheckBox
+
+        val dialogPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+
+            // 主标题
+            add(JLabel("创建MVP包结构").apply {
+                font = font.deriveFont(Font.BOLD, 14f)
+                alignmentX = JLabel.LEFT_ALIGNMENT
+                border = BorderFactory.createEmptyBorder(0, 0, 10, 0)
+            })
+
+            // 包名输入部分
+            add(JLabel("输入完整包名 (例如: com.project.myapplication.bluetooth):").apply {
+                alignmentX = JLabel.LEFT_ALIGNMENT
+                border = BorderFactory.createEmptyBorder(0, 0, 5, 0)
+            })
             add(JTextField(lastPackage ?: "", 30).apply {
+                packageInputField = this
                 name = "packageInput"
-            }, BorderLayout.CENTER)
+                alignmentX = JTextField.LEFT_ALIGNMENT
+                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            })
+
+            // 自动检测说明
+            add(JLabel("<html><body style='width: 300px'>" +
+                    "当<b>不创建</b>基础接口时，插件会：<br>" +
+                    "1. 自动在当前包或父包中查找base子包<br>" +
+                    "2. 检测是否存在BasePresenter/BaseView接口<br>" +
+                    "3. 如找到则自动引用，否则使用Object作为父接口</body></html>").apply {
+                alignmentX = JLabel.LEFT_ALIGNMENT
+                border = BorderFactory.createEmptyBorder(10, 0, 10, 0)
+                foreground = Color.GRAY
+            })
+
+            // 创建基础接口选项
             add(JCheckBox("创建基础接口 (BasePresenter/BaseView)", lastBaseOption).apply {
+                baseCheckbox = this
                 name = "baseCheckbox"
-            }, BorderLayout.SOUTH)
+                alignmentX = JCheckBox.LEFT_ALIGNMENT
+            })
         }
 
         val result = JOptionPane.showConfirmDialog(
@@ -63,8 +100,8 @@ class CreateMvpAction : AnAction("创建MVP包结构") {
 
         if (result != JOptionPane.OK_OPTION) return
 
-        val fullPackageName = (dialogPanel.getComponent(1) as JTextField).text.takeIf { it.isNotBlank() } ?: return
-        val createBase = (dialogPanel.getComponent(2) as JCheckBox).isSelected
+        val fullPackageName = packageInputField.text.takeIf { it.isNotBlank() } ?: return
+        val createBase = baseCheckbox.isSelected
 
         properties.setValue(LAST_PACKAGE_KEY, fullPackageName)
         properties.setValue(LAST_BASE_OPTION_KEY, createBase)
@@ -282,16 +319,41 @@ class CreateMvpAction : AnAction("创建MVP包结构") {
     }
 
     private fun findExistingBaseInterfaces(project: Project, startDir: PsiDirectory): Pair<String, String> {
+        var currentDir: PsiDirectory? = startDir
         var basePresenterPath = ""
         var baseViewPath = ""
 
-        // 简化查找逻辑，只查找当前项目的base包
-        val baseDir = startDir.findSubdirectory("base") ?: return Pair("", "")
+        // 向上查找最多5层父目录
+        var searchDepth = 0
+        while (currentDir != null && searchDepth < 5) {
+            val baseDir = currentDir.findSubdirectory("base")
+            if (baseDir != null) {
+                val basePackage = baseDir.getPackageName()
 
-        val basePackageName = baseDir.getPackageName()
-        if (basePackageName.isNotEmpty()) {
-            basePresenterPath = basePackageName
-            baseViewPath = basePackageName
+                // 检查BasePresenter是否存在
+                if (basePresenterPath.isEmpty()) {
+                    val presenterFile = baseDir.findFile("BasePresenter.java")
+                    if (presenterFile != null) {
+                        basePresenterPath = basePackage
+                    }
+                }
+
+                // 检查BaseView是否存在
+                if (baseViewPath.isEmpty()) {
+                    val viewFile = baseDir.findFile("BaseView.java")
+                    if (viewFile != null) {
+                        baseViewPath = basePackage
+                    }
+                }
+
+                // 如果都找到了就提前结束
+                if (basePresenterPath.isNotEmpty() && baseViewPath.isNotEmpty()) {
+                    break
+                }
+            }
+
+            currentDir = currentDir.parentDirectory
+            searchDepth++
         }
 
         return Pair(basePresenterPath, baseViewPath)
